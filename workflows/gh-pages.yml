@@ -1,0 +1,79 @@
+name: GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci
+      - master
+  pull_request:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+    defaults:
+      run:
+        working-directory: blog
+    env:
+      TZ: Asia/Shanghai
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - run: npm ci
+
+      - run: python ./weasel_testing_appcast.py
+
+      - name: Deploy luna pinyin and stroke
+        uses: rimeinn/deploy-schema@master
+        with:
+          user-recipe-list: |-
+            luna-pinyin
+            stroke
+          schema-list: |-
+            luna_pinyin
+            stroke
+
+      - name: Install fcitx5-rime.js
+        run: |
+          wget -P /tmp https://github.com/rimeinn/fcitx5-rime.js/releases/download/0.1.1/fcitx5-rime.tgz
+          tar xf /tmp/fcitx5-rime.tgz -C /tmp
+          mv /tmp/package/dist/* source/online
+          rm -f source/online/Fcitx5.d.ts
+
+      - name: Generate site
+        run: |
+          mv /tmp/deploy-schema/artifact.zip source/online/rime.zip
+          npx hexo clean
+          npx hexo generate
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: public
+          path: |
+            blog/public
+
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v4
+        if: ${{ github.ref == 'refs/heads/master' }}
+        with:
+          deploy_key: ${{ secrets.ACTIONS_DEPLOY_KEY }}
+          external_repository: rime/rime.github.io
+          publish_branch: master
+          publish_dir: ./blog/public
+          cname: rime.im
